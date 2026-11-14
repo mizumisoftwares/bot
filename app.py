@@ -6,14 +6,13 @@ import traceback
 
 app = FastAPI()
 
+# 1. Fixed URL: Use /resolve/main/ instead of /tree/ for direct file downloading
 PARQUETS = [
-    "hf://datasets/warmifans/HiTeckGroup@main/part1.parquet",
-    "hf://datasets/warmifans/HiTeckGroup@main/part2a.parquet",
-    "hf://datasets/warmifans/HiTeckGroup@main/part2b_new.parquet"
+    "https://huggingface.co/datasets/sarveshmgkvp/HiTeckNuMinfo-bucket/resolve/main/users_data.parquet"
 ]
 
+# Initialize global DuckDB connection
 con = duckdb.connect()
-
 con.execute("INSTALL httpfs;")
 con.execute("LOAD httpfs;")
 
@@ -24,17 +23,21 @@ def home():
 @app.get("/search")
 def search(search: str):
     try:
+        # Convert the Python list of paths to a SQL-compatible list representation.
+        # File paths cannot be passed as '?' parameters in DuckDB.
+        paths_literal = repr(PARQUETS)
 
-        query = """
+        query = f"""
         SELECT DISTINCT *
-        FROM read_parquet(?)
+        FROM read_parquet({paths_literal})
         WHERE phoneNumber = ?
            OR LOWER(name) LIKE LOWER(?)
         """
 
+        # Only user search inputs are bound using parameters to prevent SQL injection
         df = con.execute(
             query,
-            [PARQUETS, search, f"%{search}%"]
+            [search, f"%{search}%"]
         ).fetchdf()
 
         if df is None or df.empty:
@@ -43,10 +46,10 @@ def search(search: str):
                 "data": []
             }
 
-        # Remove duplicate rows (same data)
+        # Remove duplicate rows
         df = df.drop_duplicates()
 
-        # JSON-safe
+        # Handle NaN/Inf values for JSON compliance
         df = df.replace([np.inf, -np.inf], None)
         df = df.where(pd.notnull(df), None)
 
